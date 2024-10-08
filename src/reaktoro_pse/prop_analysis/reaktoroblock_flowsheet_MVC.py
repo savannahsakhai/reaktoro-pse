@@ -104,9 +104,9 @@ def build(sea_water_composition, sea_water_ph):
         initialize=1000, units=pyunits.kg / pyunits.m**3
     )  
     set_scaling_factor(m.fs.sea_water.density, 1e-3)
-    # """Osmotic pressure"""
-    # m.fs.sea_water.osmotic_pressure = Var(initialize=1, units=pyunits.Pa)
-    # set_scaling_factor(m.fs.sea_water.osmotic_pressure, 1e-5)
+    """Heat Capacity"""
+    m.fs.sea_water.Cp = Var(initialize=1, units=pyunits.J/(pyunits.K * pyunits.kg)) # J/(mol*K)
+    set_scaling_factor(m.fs.sea_water.Cp, 1e-5)
     """Enthalpy"""
     m.fs.sea_water.enthalpy = Var(initialize=1000, units=pyunits.J/pyunits.kg)
     set_scaling_factor(m.fs.sea_water.enthalpy, 1e-4)
@@ -129,6 +129,10 @@ def build(sea_water_composition, sea_water_ph):
         == sum(m.fs.sea_water.species_concentrations_adj[ion] for ion in m.fs.sea_water.species_concentrations)
     )
 
+    m.fs.sea_water.eq_enthalpy = Constraint(
+        expr= m.fs.sea_water.enthalpy == m.fs.sea_water.Cp * (273.15 *pyunits.K - m.fs.sea_water.temperature)
+    )
+
     @m.fs.sea_water.Constraint(list(m.fs.sea_water.species_concentrations.keys()))
     def eq_sea_water_TDS_adjust(fs, ion):
         return m.fs.sea_water.species_concentrations_adj[ion] == (
@@ -149,8 +153,9 @@ def build(sea_water_composition, sea_water_ph):
 
     m.fs.sea_water.outputs = {
         # ("osmoticPressure","H2O",): m.fs.sea_water.osmotic_pressure,  # not how the second key is the water, we can get osmotic pressure for different components in the system
-        ("specificEnthalpy", "AqueousPhase"): m.fs.sea_water.enthalpy,
-        # ("vaporPressure", "H2O(g)"): m.fs.sea_water.vapor_pressure,
+        ("specificHeatCapacityConstP", None): m.fs.sea_water.Cp,
+        # ("specificEnthalpy", "AqueousPhase"): m.fs.sea_water.enthalpy,
+        ("vaporPressure", "H2O(g)"): m.fs.sea_water.vapor_pressure,
         ("density", None): m.fs.sea_water.density,
         ("charge", None): m.fs.sea_water.charge,
         } # - this will force reaktor to return exact speciation with "speciesAmount": False,
@@ -180,19 +185,19 @@ def build(sea_water_composition, sea_water_ph):
             "species_to_rkt_species_dict": translation_dict,
             "activity_model": "ActivityModelPitzer", 
         },
-        # gas_phase={
-        #     "phase_components": ["H2O(g)", "N2(g)"],
-        #     "activity_model": "ActivityModelRedlichKwong",
-        # },
+        gas_phase={
+            "phase_components": ["H2O(g)", "N2(g)"],
+            "activity_model": "ActivityModelRedlichKwong",
+        },
         # mineral_phase={"phase_components": ["Calcite", "Anhydrite"]},
         outputs=m.fs.sea_water.outputs,  # outputs we desired    
         database=database,  # needs to be a string that names the database file or points to its location
         dissolve_species_in_reaktoro=False,  # This will sum up all species into elements in Reaktoro directly, if set to false, it will build Pyomo constraints instead
         jacobian_options={
             "user_scaling": {
-                 ("specificEnthalpy", None): 1,
+                #  ("specificEnthalpy", None): 1,
                  ("density", None): 1000,
-                # ("specificHeatCapacityConstP", None): 1,
+                 ("specificHeatCapacityConstP", None): 1,
             },
         },
     )

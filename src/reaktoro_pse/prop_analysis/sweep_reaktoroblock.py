@@ -1,6 +1,6 @@
 from parameter_sweep import LinearSample, parameter_sweep, PredeterminedFixedSample
 from pyomo.environ import units as pyunits
-import reaktoroblock_flowsheet as reaktoro_flowsheet
+import reaktoroblock_flowsheet_MVC as reaktoro_flowsheet
 
 def set_up_sensitivity():
     outputs = {}
@@ -28,10 +28,10 @@ def set_up_sensitivity():
 
     # create outputs
     outputs["TDS mg/L"] = m.fs.sea_water.TDS
-    # outputs["Density"] = m.fs.sea_water.density
+    outputs["Density"] = m.fs.sea_water.density
     # outputs["Osmotic Pressure"] = m.fs.sea_water.osmotic_pressure
     outputs["Enthalpy"] = m.fs.sea_water.enthalpy
-    # outputs["Vapor Pressure"] = m.fs.sea_water.vapor_pressure
+    outputs["Vapor Pressure"] = m.fs.sea_water.vapor_pressure
 
     # outputs["ST Calcite"] = m.fs.scalingTendency_Calcite
     # outputs["ST Gypsum"] = m.fs.scalingTendency_Gypsum
