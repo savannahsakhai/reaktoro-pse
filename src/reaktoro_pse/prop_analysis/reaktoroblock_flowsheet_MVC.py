@@ -22,7 +22,7 @@ from watertap.core.solvers import get_solver
 from pyomo.util.calc_var_value import calculate_variable_from_constraint
 
 # WaterTAP core components
-import watertap.property_models.NaCl_prop_pack as properties
+import watertap.property_models.NaCl_prop_pack as props
 
 # Import reaktoro-pse and reaktoro
 from reaktoro_pse.reaktoro_block import ReaktoroBlock
@@ -64,8 +64,20 @@ def build(sea_water_composition, sea_water_ph):
     # create IDAES flowsheet
     m.fs = FlowsheetBlock(dynamic=False)
 
+    m.fs.properties = props.NaClParameterBlock()
+    m.fs.feed = m.fs.properties.build_state_block([0])
+    m.fs.feed[0].flow_mass_phase_comp["Liq", "H2O"].fix(1)
+    m.fs.feed[0].mass_frac_phase_comp["Liq", "NaCl"].fix(0.035)
+    m.fs.feed[0].flow_mass_phase_comp["Liq", "NaCl"]
+
+    m.fs.properties.set_default_scaling("flow_mass_phase_comp", 1, index=("Liq", "H2O"))
+    m.fs.properties.set_default_scaling(
+        "flow_mass_phase_comp", 1e2, index=("Liq","NaCl")
+    )
+
     ''' build block for holding sea water properties'''
     m.fs.sea_water=Block()
+
     """temperature"""
     m.fs.sea_water.temperature = Var(
         initialize=293, bounds=(0,1000), units=pyunits.K)
@@ -73,7 +85,7 @@ def build(sea_water_composition, sea_water_ph):
     set_scaling_factor(m.fs.sea_water.temperature, 1/293)
     """pressure"""
     m.fs.sea_water.pressure = Var(
-        initialize=1e5, units=pyunits.Pa)
+        initialize=101325, units=pyunits.Pa)
     m.fs.sea_water.pressure.fix()
     set_scaling_factor(m.fs.sea_water.pressure, 1/1e5)
     """pH"""
@@ -99,11 +111,6 @@ def build(sea_water_composition, sea_water_ph):
     """Charge neutrality"""
     m.fs.sea_water.charge = Var(initialize=0)
     set_scaling_factor(m.fs.sea_water.charge, 1e8)
-    """Solution density"""
-    m.fs.sea_water.density = Var(
-        initialize=1000, units=pyunits.kg / pyunits.m**3
-    )  
-    set_scaling_factor(m.fs.sea_water.density, 1e-3)
     """Heat Capacity"""
     m.fs.sea_water.Cp = Var(initialize=1, units=pyunits.J/(pyunits.K * pyunits.kg)) # J/(mol*K)
     set_scaling_factor(m.fs.sea_water.Cp, 1e-5)
@@ -113,14 +120,22 @@ def build(sea_water_composition, sea_water_ph):
     """Vapor Pressure"""
     m.fs.sea_water.vapor_pressure = Var(initialize=1, units=pyunits.Pa)
     set_scaling_factor(m.fs.sea_water.vapor_pressure, 1e-5)
+    """Solution density"""
+    m.fs.sea_water.density = Var(
+        initialize=1000, units=pyunits.kg / pyunits.m**3
+    )  
+    set_scaling_factor(m.fs.sea_water.density, 1e-3)
+    """Osmotic pressure"""
+    m.fs.sea_water.osmotic_pressure = Var(initialize=1, units=pyunits.Pa)
+    set_scaling_factor(m.fs.sea_water.osmotic_pressure, 1e-5)
     
     m.fs.sea_water.TDS = Var(initialize=35000, units=pyunits.mg/pyunits.L)
     m.fs.sea_water.TDS_adjust_constant = Var(initialize=1)
 
-    m.fs.sea_water.mass_flow_TDS = Var(initialize=1,  units=pyunits.kg / pyunits.s)
+    # m.fs.sea_water.mass_flow_TDS = Var(initialize=1,  units=pyunits.kg / pyunits.s)
 
     m.fs.sea_water.eq_TDS_flow = Constraint(
-        expr=m.fs.sea_water.mass_flow_TDS
+        expr=  m.fs.feed[0].flow_mass_phase_comp["Liq", "NaCl"]
         == sum(m.fs.sea_water.species_mass_flow[ion] for ion in m.fs.sea_water.species_concentrations)
     )
 
@@ -138,40 +153,44 @@ def build(sea_water_composition, sea_water_ph):
         return m.fs.sea_water.species_concentrations_adj[ion] == (
             m.fs.sea_water.TDS_adjust_constant*m.fs.sea_water.species_concentrations[ion]
         )
-    
 
     """Write constraints to convert concentration to mass flows"""
     @m.fs.sea_water.Constraint(list(m.fs.sea_water.species_concentrations.keys()))
     def eq_sea_water_species_mass_flow(fs, ion):
-        """calculate mass flow based on density"""
-        return m.fs.sea_water.species_mass_flow[ion] == pyunits.convert(
-            m.fs.sea_water.species_concentrations_adj[ion]
-            * m.fs.sea_water.species_mass_flow["H2O"]
-            / m.fs.sea_water.density,
-            to_units=pyunits.kg / pyunits.s,
-        )
+        if ion == "H2O":
+            return (
+                m.fs.feed.species_mass_flow["H2O"]
+                == m.fs.feed[0].flow_mass_phase_comp["Liq", "H2O"]
+            )
+        else:
+            """calculate mass flow based on density"""
+            return m.fs.sea_water.species_mass_flow[ion] == pyunits.convert(
+                m.fs.sea_water.species_concentrations_adj[ion]
+                * m.fs.feed[0].flow_mass_phase_comp["Liq", "H2O"]
+                / m.fs.sea_water.density,
+                to_units=pyunits.kg / pyunits.s,
+            )
 
     m.fs.sea_water.outputs = {
-        # ("osmoticPressure","H2O",): m.fs.sea_water.osmotic_pressure,  # not how the second key is the water, we can get osmotic pressure for different components in the system
-        ("specificHeatCapacityConstP", None): m.fs.sea_water.Cp,
-        # ("specificEnthalpy", "AqueousPhase"): m.fs.sea_water.enthalpy,
-        ("vaporPressure", "H2O(g)"): m.fs.sea_water.vapor_pressure,
+        ("osmoticPressure","H2O",): m.fs.sea_water.osmotic_pressure,  
+        # ("specificHeatCapacityConstP", None): m.fs.sea_water.Cp,
+        # ("vaporPressure", "H2O(g)"): m.fs.sea_water.vapor_pressure,
         ("density", None): m.fs.sea_water.density,
         ("charge", None): m.fs.sea_water.charge,
-        } # - this will force reaktor to return exact speciation with "speciesAmount": False,
+        }
 
-    translation_dict = {
-        "H2O": "H2O(aq)",
-        "Mg": "Mg+2",
-        "Na": "Na+",
-        "Cl": "Cl-",
-        "K": "K+", # Why can't it solve with potassium?
-        "SO4": "SO4-2",
-        "Ca": "Ca+2",
-        "HCO3": "HCO3-",
-    }
+    # translation_dict = {
+    #     "H2O": "H2O(aq)",
+    #     "Mg": "Mg+2",
+    #     "Na": "Na+",
+    #     "Cl": "Cl-",
+    #     "K": "K+", 
+    #     "SO4": "SO4-2",
+    #     "Ca": "Ca+2",
+    #     "HCO3": "HCO3-",
+    # }
 
-    database = reaktoro.SupcrtDatabase("supcrtbl")
+    # database = reaktoro.SupcrtDatabase("supcrtbl")
 
     m.fs.sea_water.eq_reaktoro_properties = ReaktoroBlock(
         system_state={
@@ -182,22 +201,21 @@ def build(sea_water_composition, sea_water_ph):
         aqueous_phase={
             "composition": m.fs.sea_water.species_mass_flow,  # This is the spices mass flow
             "convert_to_rkt_species": True,
-            "species_to_rkt_species_dict": translation_dict,
+            # "species_to_rkt_species_dict": translation_dict,
             "activity_model": "ActivityModelPitzer", 
         },
-        gas_phase={
-            "phase_components": ["H2O(g)", "N2(g)"],
-            "activity_model": "ActivityModelRedlichKwong",
-        },
-        # mineral_phase={"phase_components": ["Calcite", "Anhydrite"]},
+        # gas_phase={
+        #     "phase_components": ["H2O(g)", "N2(g)"],
+        #     "activity_model": "ActivityModelRedlichKwong",
+        # },
         outputs=m.fs.sea_water.outputs,  # outputs we desired    
-        database=database,  # needs to be a string that names the database file or points to its location
+        # database=database,  # needs to be a string that names the database file or points to its location
         dissolve_species_in_reaktoro=False,  # This will sum up all species into elements in Reaktoro directly, if set to false, it will build Pyomo constraints instead
         jacobian_options={
             "user_scaling": {
                 #  ("specificEnthalpy", None): 1,
                  ("density", None): 1000,
-                 ("specificHeatCapacityConstP", None): 1,
+                #  ("specificHeatCapacityConstP", None): 1,
             },
         },
     )
@@ -248,20 +266,20 @@ def solve(blk, solver=None, tee=False, check_termination=True):
     return results
 
 
-def display(m):
+# def display(m):
 
-   print(
-        "Density",
-        m.fs.sea_water.density.value,
-    )
-   print(
-            "Enthalpy",
-            m.fs.sea_water.enthalpy.value,
-        )
-   print(
-            "Vapor Pressure",
-            m.fs.sea_water.vapor_pressure.value,
-        )
+#    print(
+#         "Density",
+#         m.fs.sea_water.density.value,
+#     )
+#    print(
+#             "Enthalpy",
+#             m.fs.sea_water.enthalpy.value,
+#         )
+#    print(
+#             "Vapor Pressure",
+#             m.fs.sea_water.vapor_pressure.value,
+#         )
 #    print(
 #         "Osmotic pressure",
 #         m.fs.sea_water.osmotic_pressure.value,

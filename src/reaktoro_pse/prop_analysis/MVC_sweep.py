@@ -55,15 +55,22 @@ def run_analysis_MVC(case_num=1, flowsheet=reaktoro_flowsheet, interpolate_nan_o
     if case_num == 1:
         # sensitivity analysis
         sweep_params = dict()
-        sweep_params["Water Recovery"] = LinearSample(m.fs.recovery[0], 0.5, 0.7, 21)
+        sweep_params["Water Recovery"] = LinearSample(m.fs.recovery[0], 0.5, 0.7, 11)
 
     elif case_num == 2:
         # sensitivity analysis
         sweep_params = dict()
-        sweep_params["Water Recovery"] = LinearSample(m.fs.recovery[0], 0.45, 0.75, 81)
         sweep_params["Inlet Salinity"] = PredeterminedFixedSample(
-            m.fs.feed.properties[0].mass_frac_phase_comp["Liq", "NaCl"], [0.035, 0.07]
+            m.fs.feed.properties[0].mass_frac_phase_comp["Liq", "TDS"], [.070, .100, .125, .150]
         )
+        sweep_params["Water Recovery"] = LinearSample(m.fs.recovery[0], 0.4, 0.8, 5)
+    elif case_num == 3:
+        # sensitivity analysis
+        sweep_params = dict()
+        sweep_params["Inlet Salinity"] = LinearSample(
+            m.fs.feed.properties[0].mass_frac_phase_comp["Liq", "TDS"], .070,.150, 17
+        )
+
     else:
         raise ValueError(f"{case_num} is not yet implemented")
 
@@ -83,9 +90,15 @@ def run_analysis_MVC(case_num=1, flowsheet=reaktoro_flowsheet, interpolate_nan_o
 
 
 if __name__ == "__main__":
-    start_time = time.time()
-    results, sweep_params, m = run_analysis_MVC(case_num=1, output_filename="data_MVC_reaktoro.csv")
-    end_time= time.time()
-    elapsed_time_1 = end_time - start_time
+    # start_time = time.time()
+    # results, sweep_params, m = run_analysis_MVC(case_num=1, output_filename="data_MVC_reaktoro.csv")
+    # end_time= time.time()
+    # elapsed_time_1 = end_time - start_time
 
-    print(elapsed_time_1)
+    start_time = time.time()
+    results, sweep_params, m = run_analysis_MVC(case_num=3, output_filename="data_MVC_reaktoro_1D.csv")
+    end_time= time.time()
+    elapsed_time_2 = end_time - start_time
+
+    # print(elapsed_time_1)
+    print(elapsed_time_2)

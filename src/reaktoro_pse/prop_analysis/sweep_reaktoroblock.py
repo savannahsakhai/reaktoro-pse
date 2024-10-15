@@ -27,17 +27,14 @@ def set_up_sensitivity():
     opt_function = reaktoro_flowsheet.solve
 
     # create outputs
-    outputs["TDS mg/L"] = m.fs.sea_water.TDS
+    # outputs["TDS mg/L"] = m.fs.sea_water.TDS
     outputs["Density"] = m.fs.sea_water.density
-    # outputs["Osmotic Pressure"] = m.fs.sea_water.osmotic_pressure
-    outputs["Enthalpy"] = m.fs.sea_water.enthalpy
-    outputs["Vapor Pressure"] = m.fs.sea_water.vapor_pressure
-
-    # outputs["ST Calcite"] = m.fs.scalingTendency_Calcite
-    # outputs["ST Gypsum"] = m.fs.scalingTendency_Gypsum
+    outputs["Osmotic Pressure"] = m.fs.sea_water.osmotic_pressure
+    # outputs["Enthalpy"] = m.fs.sea_water.enthalpy
+    # outputs["Vapor Pressure"] = m.fs.sea_water.vapor_pressure
 
     # outputs["Calcite"] = m.fs.phaseamount_Calcite
-    # outputs["Gypsum"] = m.fs.phaseamount_Gypsum
+    # outputs["Anhydrite"] = m.fs.phaseamount_Anhydrite
    
     return outputs, opt_function, m
 
@@ -55,11 +52,21 @@ def run_analysis(case_num=4, nx=2, interpolate_nan_outputs=True, output_filename
         # sensitivity analysis
         sweep_params = dict()
         sweep_params["Feed TDS"] = PredeterminedFixedSample(
-           m.fs.sea_water.mass_flow_TDS, [3.361113e-02,4.838276e-02,9.373868e-02,1.366460e-01,1.775197e-01]
+           m.fs.sea_water.mass_flow_TDS, [3.361113e-02,4.838276e-02,9.373868e-02,1.366460e-01,1.775197e-01,]
         )
         sweep_params["Temperature"] = LinearSample(
             m.fs.sea_water.temperature, 25 + 273.15, 95 + 273.15, 8
         )
+    elif case_num == 5:
+    # sensitivity analysis
+        sweep_params = dict()
+        sweep_params["Feed Mass Frac"] = PredeterminedFixedSample(
+           m.fs.feed[0].mass_frac_phase_comp["Liq", "NaCl"], [.035,.070, .100, .125, .150, .200, .250]
+        )
+        sweep_params["Temperature"] = LinearSample(
+            m.fs.sea_water.temperature, 25 + 273.15, 95 + 273.15, 8
+        )
+    
     elif case_num == 1:
         sweep_params = dict()
         sweep_params["Feed TDS"] = PredeterminedFixedSample(
@@ -71,18 +78,15 @@ def run_analysis(case_num=4, nx=2, interpolate_nan_outputs=True, output_filename
     elif case_num == 2:
         # map scaling 
         sweep_params = dict()
-        sweep_params["Feed TDS"] = PredeterminedFixedSample(
-           m.fs.sea_water.mass_flow_TDS, [3.361113e-02,4.838276e-02,9.373868e-02,1.366460e-01,1.775197e-01]
+        sweep_params["Feed Mass Frac"] = LinearSample(
+           m.fs.feed[0].mass_frac_phase_comp["Liq", "NaCl"], .035,.30, 10
         )
         sweep_params["Temperature"] = LinearSample(
-            m.fs.sea_water.temperature, 25 + 273.15, 95 + 273.15, 8
+            m.fs.sea_water.temperature, 25 + 273.15, 100 + 273.15, 4
         )
-        sweep_params["pH"] = LinearSample(
-           m.fs.sea_water.pH, 5.5, 10.5, 6
-        )
-        sweep_params["Pressure"] = PredeterminedFixedSample(
-           m.fs.sea_water.pressure, [1e4, 5e4, 1e5, 4e6, 8e6]
-        )
+        # # sweep_params["pH"] = LinearSample(
+        # #    m.fs.sea_water.pH, 5.5, 10.5, 3
+        # # )
 
         
     else:
@@ -102,7 +106,8 @@ def run_analysis(case_num=4, nx=2, interpolate_nan_outputs=True, output_filename
 
 
 if __name__ == "__main__":
-    results, sweep_params, m = run_analysis(case_num=4, output_filename="data_property_MVC_reaktoro.csv")
+    # results, sweep_params, m = run_analysis(case_num=5, output_filename="data_property_MVC_reaktoro.csv")
+    results, sweep_params, m = run_analysis(case_num=5, output_filename="data_property_RO_reaktoro.csv")
     # results, sweep_params, m = run_analysis(case_num=1, output_filename="data_property_ref_state_reaktoro.csv")
     # results, sweep_params, m = run_analysis(case_num=2, output_filename="data_scaling_reaktoro.csv")
     # print(results)

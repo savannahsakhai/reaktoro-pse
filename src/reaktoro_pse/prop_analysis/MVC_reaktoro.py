@@ -11,7 +11,7 @@ from pyomo.environ import (
     assert_optimal_termination,
 )
 from pyomo.network import Arc, SequentialDecomposition
-
+from pyomo.opt import SolverStatus, TerminationCondition
 import pyomo.environ as pyo
 from pyomo.util.calc_var_value import calculate_variable_from_constraint
 from idaes.core import FlowsheetBlock
@@ -57,8 +57,7 @@ def main():
 
     print("\n***---First solve - simulation results---***")
     results = solve(m, tee=False)
-    print("Termination condition: ", results.solver.termination_condition)
-    assert_optimal_termination(results)
+    # assert_optimal_termination(results)
     display_metrics(m)
     display_design(m)
 
@@ -67,7 +66,6 @@ def main():
     set_up_optimization(m)
 
     results = solve(m, tee=True)
-    print("Termination condition: ", results.solver.termination_condition)
     display_metrics(m)
     display_design(m)
 
@@ -75,7 +73,6 @@ def main():
 
     m.fs.recovery.fix(0.65)
     results = solve(m, tee=False)
-    print("Termination condition: ", results.solver.termination_condition)
     display_metrics(m)
     display_design(m)
 
@@ -311,7 +308,7 @@ def build_reaktoro_blocks(m):
         "K": 380,
         "Ca": 400,
         "Mg": 1262,
-        "Cl": 17000,
+        "Cl": 18977.2,
         "SO4": 2649,
         "HCO3": 140,
     }
@@ -464,6 +461,44 @@ def build_reaktoro_blocks(m):
         },
     )
 
+    m.brine_vapor_properties = Var(
+        [
+            ("vaporPressure", "H2O(g)"),
+        ],
+        initialize=1e5,
+    )
+    iscale.set_scaling_factor(m.brine_vapor_properties, 1e-5)
+    m.system_pressure = Var(initialize=1e5, units=pyunits.Pa)
+    iscale.set_scaling_factor(m.system_pressure, 1e-5)
+    m.system_pressure.fix()
+
+    m.eq_vapor_properties = ReaktoroBlock(
+        system_state={
+            "temperature": m.fs.evaporator.properties_brine[0].temperature,
+            "pressure": m.system_pressure,
+            "pH": m.fs.brine_pH,
+        },
+        aqueous_phase={
+            "composition": m.fs.brine.species_mass_flow,
+            "convert_to_rkt_species": True,
+            "species_to_rkt_species_dict": translation_dict,
+            "activity_model": "ActivityModelPitzer",
+        },
+        gas_phase={
+            "phase_components": ["H2O(g)", "N2(g)"],
+            "activity_model": "ActivityModelRedlichKwong",
+        },
+        outputs=m.brine_vapor_properties,
+        database=database,
+        dissolve_species_in_reaktoro=False,
+        build_speciation_block=False,
+        jacobian_options={
+            "user_scaling": {
+                ("vaporPressure", None): 1,
+            },
+        },
+    )
+
     # reaktoro blocks
     for comp, pyoobj in m.fs.feed.eq_feed_species_mass_flow.items():
         calculate_variable_from_constraint(m.fs.feed.species_mass_flow[comp], pyoobj)
@@ -479,30 +514,88 @@ def build_reaktoro_blocks(m):
             m.fs.brine.species_mass_flow[key], 1 / m.fs.brine.species_mass_flow[key].value
         )
 
+        iscale.constraint_scaling_transform(
+            m.fs.feed.eq_feed_species_mass_flow[key],
+            1 / m.fs.feed.species_mass_flow[key].value,
+        )
+
 
 def activate_reaktoro(m):
 
     build_reaktoro_blocks(m)
-    
+
     m.eq_feed_properties.initialize()
     m.eq_brine_properties.initialize()
-
+    m.eq_vapor_properties.initialize()
     # enth_flow = mass_flow*Cp*(273.15-T)
-    feed_flow = m.fs.feed.properties[0].flow_mass_phase_comp[("Liq", "H2O")] + m.fs.feed.properties[0].flow_mass_phase_comp[("Liq", "TDS")]
-    brine_flow =  m.fs.brine.properties[0].flow_mass_phase_comp[("Liq", "H2O")] + m.fs.brine.properties[0].flow_mass_phase_comp[("Liq", "TDS")]
+    feed_flow = (
+        m.fs.feed.properties[0].flow_mass_phase_comp[("Liq", "H2O")]
+        + m.fs.feed.properties[0].flow_mass_phase_comp[("Liq", "TDS")]
+    )
+    brine_flow = (
+        m.fs.brine.properties[0].flow_mass_phase_comp[("Liq", "H2O")]
+        + m.fs.brine.properties[0].flow_mass_phase_comp[("Liq", "TDS")]
+    )
     vapor_flow = m.fs.evaporator.properties_vapor[0].flow_mass_phase_comp["Vap", "H2O"]
     T_ref = 273.15 * pyunits.K
 
     # Evaporator
     # energy balance
-    m.fs.evaporator.properties_feed[0].enth_flow = (m.feed_reaktoro_properties[("specificHeatCapacityConstP", None)]*(pyunits.J/(pyunits.K * pyunits.kg))*feed_flow*(T_ref - m.fs.evaporator.properties_feed[0].temperature))
+    print("init enth value ", m.fs.evaporator.properties_feed[0].enth_flow.value)
+    m.fs.evaporator.properties_feed[0].eq_enth_flow_rkt = Constraint(
+        expr=m.fs.evaporator.properties_feed[0].enth_flow
+        == -(
+            m.feed_reaktoro_properties[("specificHeatCapacityConstP", None)]
+            * (pyunits.J / (pyunits.K * pyunits.kg))
+            * feed_flow
+            * (T_ref - m.fs.evaporator.properties_feed[0].temperature)
+        )
+    )
     m.fs.evaporator.properties_feed[0].eq_enth_flow.deactivate()
-    m.fs.evaporator.properties_brine[0].enth_flow = (m.brine_reaktoro_properties[("specificHeatCapacityConstP", None)]*(pyunits.J/(pyunits.K * pyunits.kg))*brine_flow*(T_ref - m.fs.evaporator.properties_brine[0].temperature))
+    calculate_variable_from_constraint(
+        m.fs.evaporator.properties_feed[0].enth_flow,
+        m.fs.evaporator.properties_feed[0].eq_enth_flow_rkt,
+    )
+    print("rkt enth value ", m.fs.evaporator.properties_feed[0].enth_flow.value)
+    print("init enth value ", m.fs.evaporator.properties_brine[0].enth_flow.value)
+    iscale.constraint_scaling_transform(
+        m.fs.evaporator.properties_feed[0].eq_enth_flow_rkt, 1e-5
+    )
     m.fs.evaporator.properties_brine[0].eq_enth_flow.deactivate()
+    m.fs.evaporator.properties_brine[0].eq_enth_flow_rkt = Constraint(
+        expr=m.fs.evaporator.properties_brine[0].enth_flow
+        == -(
+            m.brine_reaktoro_properties[("specificHeatCapacityConstP", None)]
+            * (pyunits.J / (pyunits.K * pyunits.kg))
+            * brine_flow
+            * (T_ref - m.fs.evaporator.properties_brine[0].temperature)
+        )
+    )
+    calculate_variable_from_constraint(
+        m.fs.evaporator.properties_brine[0].enth_flow,
+        m.fs.evaporator.properties_brine[0].eq_enth_flow_rkt,
+    )
+    print("rkt enth value ", m.fs.evaporator.properties_brine[0].enth_flow.value)
+    iscale.constraint_scaling_transform(
+        m.fs.evaporator.properties_brine[0].eq_enth_flow_rkt, 1e-5
+    )
 
     # vapor pressure
-    # m.fs.evaporator.properties_brine[0].pressure_sat = m.vapor_reaktoro_properties[("vaporPressure", "H2O(g)")] *pyunits.Pa
-    # m.fs.evaporator.properties_brine[0].eq_pressure_sat.deactivate()
+    print("init vap", m.fs.evaporator.properties_brine[0].pressure_sat.value)
+    m.fs.evaporator.properties_brine[0].eq_pressure_sat_rkt = Constraint(
+        expr=m.fs.evaporator.properties_brine[0].pressure_sat
+        == m.brine_vapor_properties[("vaporPressure", "H2O(g)")] * pyunits.Pa
+    )
+    iscale.constraint_scaling_transform(
+        m.fs.evaporator.properties_brine[0].eq_pressure_sat, 1e-5
+    )
+
+    calculate_variable_from_constraint(
+        m.fs.evaporator.properties_brine[0].pressure_sat,
+        m.fs.evaporator.properties_brine[0].eq_pressure_sat_rkt,
+    )
+    print("rkt vap ", m.fs.evaporator.properties_brine[0].pressure_sat.value)
+    m.fs.evaporator.properties_brine[0].eq_pressure_sat.deactivate()
 
 
 
@@ -1015,26 +1108,17 @@ def scale_costs(m):
 
 def solve(m, solver=None, tee=False, raise_on_failure=False):
     print(
-        "Recovery:                                 %.2f %%"
-        % (m.fs.recovery[0].value * 100)
+        "Inlet Mass fraction: %.3f , Recovery: %.2f "
+        % (m.fs.feed.properties[0].mass_frac_phase_comp["Liq", "TDS"].value, m.fs.recovery[0].value)
     )
     # ---solving---
     if solver is None:
         solver = get_solver(solver="cyipopt-watertap")
         solver.options["max_iter"]= 200
     results = solver.solve(m, tee=tee)
-    
+    print("Termination condition: ", results.solver.termination_condition)
 
-    if check_optimal_termination(results):
-        return results
-    msg = (
-        "The current configuration is infeasible. Please adjust the decision variables."
-    )
-    if raise_on_failure:
-        raise RuntimeError(msg)
-    else:
-        print(msg)
-        return results
+    return results
 
 
 def set_up_optimization(m):
