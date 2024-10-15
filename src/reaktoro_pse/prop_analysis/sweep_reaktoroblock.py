@@ -29,9 +29,9 @@ def set_up_sensitivity():
     # create outputs
     # outputs["TDS mg/L"] = m.fs.sea_water.TDS
     outputs["Density"] = m.fs.sea_water.density
-    outputs["Osmotic Pressure"] = m.fs.sea_water.osmotic_pressure
-    # outputs["Enthalpy"] = m.fs.sea_water.enthalpy
-    # outputs["Vapor Pressure"] = m.fs.sea_water.vapor_pressure
+    # outputs["Osmotic Pressure"] = m.fs.sea_water.osmotic_pressure
+    outputs["Enthalpy"] = m.fs.sea_water.enthalpy
+    outputs["Vapor Pressure"] = m.fs.sea_water.vapor_pressure
 
     # outputs["Calcite"] = m.fs.phaseamount_Calcite
     # outputs["Anhydrite"] = m.fs.phaseamount_Anhydrite
@@ -87,8 +87,6 @@ def run_analysis(case_num=4, nx=2, interpolate_nan_outputs=True, output_filename
         # # sweep_params["pH"] = LinearSample(
         # #    m.fs.sea_water.pH, 5.5, 10.5, 3
         # # )
-
-        
     else:
         raise ValueError(f"{case_num} is not yet implemented")
 

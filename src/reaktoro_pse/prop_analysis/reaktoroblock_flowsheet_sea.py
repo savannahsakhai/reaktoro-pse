@@ -266,7 +266,7 @@ def solve(blk, solver=None, tee=False, check_termination=True):
     return results
 
 
-# def display(m):
+def display(m):
 
 #    print(
 #         "Density",
@@ -280,10 +280,10 @@ def solve(blk, solver=None, tee=False, check_termination=True):
 #             "Vapor Pressure",
 #             m.fs.sea_water.vapor_pressure.value,
 #         )
-#    print(
-#         "Osmotic pressure",
-#         m.fs.sea_water.osmotic_pressure.value,
-#     )
+   print(
+        "Osmotic pressure",
+        m.fs.sea_water.osmotic_pressure.value,
+    )
     
 
 if __name__ == "__main__":
