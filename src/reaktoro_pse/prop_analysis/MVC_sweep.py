@@ -39,11 +39,13 @@ def set_up_sensitivity_MVC(flowsheet):
     outputs["Compressor pressure ratio"] = m.fs.compressor.pressure_ratio
     outputs["Brine HX area"] = m.fs.hx_brine.area
     outputs["Dist HX area"] = m.fs.hx_distillate.area
+    outputs["Brine Enth Flow"] = m.fs.evaporator.properties_brine[0].enth_flow
+    outputs["Vapor Pressure"] = m.fs.evaporator.properties_brine[0].pressure_sat
         
     return outputs, opt_function, m
 
 
-def run_analysis_MVC(case_num=1, flowsheet=reaktoro_flowsheet, interpolate_nan_outputs=True, output_filename=None):
+def run_analysis_MVC(case_num=1, flowsheet=reaktoro_flowsheet, interpolate_nan_outputs=False, output_filename=None):
     
     if output_filename is None:
         output_filename = "sensitivity_" + str(case_num) + ".csv"
@@ -55,15 +57,18 @@ def run_analysis_MVC(case_num=1, flowsheet=reaktoro_flowsheet, interpolate_nan_o
     if case_num == 1:
         # sensitivity analysis
         sweep_params = dict()
-        sweep_params["Water Recovery"] = LinearSample(m.fs.recovery[0], 0.5, 0.7, 11)
+        sweep_params["Water Recovery"] = LinearSample(m.fs.recovery[0], 0.4, 0.7, 16)
+        sweep_params["Inlet Salinity"] = PredeterminedFixedSample(
+            m.fs.feed.properties[0].mass_frac_phase_comp["Liq", "TDS"], [.07]
+        )
 
     elif case_num == 2:
         # sensitivity analysis
-        sweep_params = dict()
+        sweep_params = dict()        # sensitivity analysis
         sweep_params["Inlet Salinity"] = PredeterminedFixedSample(
-            m.fs.feed.properties[0].mass_frac_phase_comp["Liq", "TDS"], [.070, .100, .125, .150]
+            m.fs.feed.properties[0].mass_frac_phase_comp["Liq", "TDS"], [.035, .05, .07, .100, .125]
         )
-        sweep_params["Water Recovery"] = LinearSample(m.fs.recovery[0], 0.4, 0.8, 5)
+        sweep_params["Water Recovery"] = LinearSample(m.fs.recovery[0], 0.45, 0.75, 7)
     elif case_num == 3:
         # sensitivity analysis
         sweep_params = dict()
@@ -90,15 +95,15 @@ def run_analysis_MVC(case_num=1, flowsheet=reaktoro_flowsheet, interpolate_nan_o
 
 
 if __name__ == "__main__":
-    # start_time = time.time()
-    # results, sweep_params, m = run_analysis_MVC(case_num=1, output_filename="data_MVC_reaktoro.csv")
-    # end_time= time.time()
-    # elapsed_time_1 = end_time - start_time
-
     start_time = time.time()
-    results, sweep_params, m = run_analysis_MVC(case_num=3, output_filename="data_MVC_reaktoro_1D.csv")
+    results, sweep_params, m = run_analysis_MVC(case_num=1, output_filename="data_MVC_reaktoro.csv")
     end_time= time.time()
-    elapsed_time_2 = end_time - start_time
+    elapsed_time_1 = end_time - start_time
 
-    # print(elapsed_time_1)
-    print(elapsed_time_2)
+    # start_time = time.time()
+    # results, sweep_params, m = run_analysis_MVC(case_num=3, output_filename="data_MVC_reaktoro_1D.csv")
+    # end_time= time.time()
+    # elapsed_time_2 = end_time - start_time
+
+    print(elapsed_time_1)
+    # print(elapsed_time_2)

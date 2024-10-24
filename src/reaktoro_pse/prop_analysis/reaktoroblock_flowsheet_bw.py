@@ -47,7 +47,7 @@ def main():
     return m
 
 
-def build():
+def build(tech="MVC"):
 
     m = ConcreteModel()
     # create IDAES flowsheet
@@ -56,7 +56,7 @@ def build():
     m.fs.properties = props.NaClParameterBlock()
     m.fs.feed = m.fs.properties.build_state_block([0])
     m.fs.feed[0].flow_mass_phase_comp["Liq", "H2O"].fix(1)
-    m.fs.feed[0].mass_frac_phase_comp["Liq", "NaCl"].fix(0.0028)
+    m.fs.feed[0].mass_frac_phase_comp["Liq", "NaCl"].fix(0.01)
     m.fs.feed[0].flow_mass_phase_comp["Liq", "NaCl"]
 
     m.fs.properties.set_default_scaling("flow_mass_phase_comp", 1, index=("Liq", "H2O"))
@@ -68,10 +68,15 @@ def build():
     m.fs.bw=Block()
     
     bw_composition = {
-        "Na": 739,
-        "Ca": 258,
-        "Cl": 870,
-        "SO4": 1011,
+        "Na": 500,
+        # "Ca": 500,
+        "Cl": 500,
+        "Mg": 500,
+        "SO4": 500,
+        # "Na": 739,
+        # "Ca": 258,
+        # "Cl": 870,
+        # "SO4": 1011,
         # "HCO3": 385,
     }
     bw_ph = 7.56
@@ -131,12 +136,10 @@ def build():
         expr= m.fs.bw.enthalpy == m.fs.bw.Cp * (273.15 *pyunits.K - m.fs.bw.temperature)
     )
     
-    m.fs.bw.TDS = Var(initialize=2800, units=pyunits.mg/pyunits.L)
+    m.fs.bw.TDS = Var(initialize=2000, units=pyunits.mg/pyunits.L)
     m.fs.bw.TDS_adjust_constant = Var(initialize=1)
     m.fs.bw.mono_di_ratio = Var(initialize=1)
     m.fs.bw.mono_di_ratio.fix()
-
-    # m.fs.bw.mass_flow_TDS = Var(initialize=1,  units=pyunits.kg / pyunits.s)
 
     m.fs.bw.eq_TDS_flow = Constraint(
         expr=  m.fs.feed[0].flow_mass_phase_comp["Liq", "NaCl"]
@@ -174,52 +177,78 @@ def build():
                 to_units=pyunits.kg / pyunits.s,
             )
 
-    m.fs.bw.outputs = {
-        # ("osmoticPressure","H2O",): m.fs.bw.osmotic_pressure,  
-        ("specificHeatCapacityConstP", None): m.fs.bw.Cp,
-        ("vaporPressure", "H2O(g)"): m.fs.bw.vapor_pressure,
-        ("density", None): m.fs.bw.density,
-        ("charge", None): m.fs.bw.charge,
+    if tech == "MVC":
+        m.fs.bw.outputs = { 
+            ("specificHeatCapacityConstP", None): m.fs.bw.Cp,
+            ("vaporPressure", "H2O(g)"): m.fs.bw.vapor_pressure,
+            ("density", None): m.fs.bw.density,
+            ("charge", None): m.fs.bw.charge,
+            }
+
+        translation_dict = {
+            "H2O": "H2O(aq)",
+            "Na": "Na+",
+            "Cl": "Cl-",
+            "SO4": "SO4-2",
+            # "Ca": "Ca+2",
+            "Mg": "Mg+2",
         }
 
-    translation_dict = {
-        "H2O": "H2O(aq)",
-        "Na": "Na+",
-        "Cl": "Cl-",
-        "SO4": "SO4-2",
-        "Ca": "Ca+2",
-    }
+        database = reaktoro.SupcrtDatabase("supcrtbl")
 
-    database = reaktoro.SupcrtDatabase("supcrtbl")
-
-    m.fs.bw.eq_reaktoro_properties = ReaktoroBlock(
-        system_state={
-            "temperature": m.fs.bw.temperature,
-            "pressure": m.fs.bw.pressure,
-            "pH": m.fs.bw.pH,
-        },
-        aqueous_phase={
-            "composition": m.fs.bw.species_mass_flow,  # This is the spices mass flow
-            "convert_to_rkt_species": True,
-            "species_to_rkt_species_dict": translation_dict,
-            "activity_model": "ActivityModelPitzer", 
-        },
-        gas_phase={
-            "phase_components": ["H2O(g)", "N2(g)"],
-            "activity_model": "ActivityModelRedlichKwong",
-        },
-        outputs=m.fs.bw.outputs,  # outputs we desired    
-        database=database,  # needs to be a string that names the database file or points to its location
-        dissolve_species_in_reaktoro=False,  # This will sum up all species into elements in Reaktoro directly, if set to false, it will build Pyomo constraints instead
-        jacobian_options={
-            "user_scaling": {
-                #  ("specificEnthalpy", None): 1,
-                 ("density", None): 1000,
-                #  ("specificHeatCapacityConstP", None): 1,
+        m.fs.bw.eq_reaktoro_properties = ReaktoroBlock(
+            system_state={
+                "temperature": m.fs.bw.temperature,
+                "pressure": m.fs.bw.pressure,
+                "pH": m.fs.bw.pH,
             },
-        },
-    )
+            aqueous_phase={
+                "composition": m.fs.bw.species_mass_flow,  
+                "convert_to_rkt_species": True,
+                "species_to_rkt_species_dict": translation_dict,
+                "activity_model": "ActivityModelPitzer", 
+            },
+            gas_phase={
+                "phase_components": ["H2O(g)", "N2(g)"],
+                "activity_model": "ActivityModelRedlichKwong",
+            },
+            outputs=m.fs.bw.outputs,     
+            database=database,  
+            dissolve_species_in_reaktoro=False,  
+            jacobian_options={
+                "user_scaling": {
+                    ("density", None): 1000,
+                    ("specificHeatCapacityConstP", None): 1,
+                },
+            },
+        )
 
+    else:
+            m.fs.bw.outputs = {
+                ("osmoticPressure","H2O",): m.fs.bw.osmotic_pressure,  
+                ("density", None): m.fs.bw.density,
+                ("charge", None): m.fs.bw.charge,
+            }
+
+            m.fs.bw.eq_reaktoro_properties = ReaktoroBlock(
+                system_state={
+                    "temperature": m.fs.bw.temperature,
+                    "pressure": m.fs.bw.pressure,
+                    "pH": m.fs.bw.pH,
+                },
+                aqueous_phase={
+                    "composition": m.fs.bw.species_mass_flow,  
+                    "convert_to_rkt_species": True,
+                    "activity_model": "ActivityModelPitzer", 
+                },
+                outputs=m.fs.bw.outputs,     
+                dissolve_species_in_reaktoro=False,  
+                jacobian_options={
+                    "user_scaling": {
+                        ("density", None): 1000,
+                    },
+                },
+            )
 
     return m, bw_composition
 
